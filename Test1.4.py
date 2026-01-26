@@ -1,199 +1,197 @@
 import streamlit as st
-from collections import deque, Counter
+from collections import deque
 
-# =========================================================
-# FOOTBALL STUDIO AI - HISTÓRICO CORRETO (ANÁLISE + VISUAL)
-# =========================================================
-
+# =====================================================
+# CONFIG
+# =====================================================
 st.set_page_config(
-    page_title="Football Studio AI - Complete",
+    page_title="Football Studio – FUSION ENGINE",
     layout="wide"
 )
 
-# ================= CONFIG =================
-MAX_HISTORY = 90
-WINDOW_ALT = 6
-WINDOW_PATTERN = 12
-
-# ================= STATE ==================
+# =====================================================
+# STATE
+# =====================================================
 if "history" not in st.session_state:
-    # INTERNO: sempre mais antigo -> mais recente
-    st.session_state.history = deque(maxlen=MAX_HISTORY)
+    st.session_state.history = deque(maxlen=120)  # recente -> antigo
 
-# ================= CORE UTILITIES =========
-def remove_draws(seq):
-    return [x for x in seq if x != "🟡"]
+if "cycle_memory" not in st.session_state:
+    st.session_state.cycle_memory = []
 
-def get_last_non_draw(history):
-    # history: antigo -> recente
-    for x in reversed(history):
-        if x != "🟡":
-            return x
-    return None
+if "rounds_without_draw" not in st.session_state:
+    st.session_state.rounds_without_draw = 0
 
-# ================= ANALYSIS ===============
-def detect_alternance(history):
-    if len(history) < WINDOW_ALT:
-        return {"status": "Insufficient", "confidence": 0}
-
-    window = list(history)[-WINDOW_ALT:]  # últimos eventos (recentes)
-    clean = remove_draws(window)
-
-    if len(clean) < 4:
-        return {"status": "Noise", "confidence": 0}
-
-    changes = sum(clean[i] != clean[i + 1] for i in range(len(clean) - 1))
-    score = changes / (len(clean) - 1)
-
-    if score >= 0.85:
-        return {"status": "Clean Alternance", "confidence": int(score * 100)}
-    elif score >= 0.65:
-        return {"status": "Noisy Alternance", "confidence": int(score * 100)}
-    elif score >= 0.45:
-        return {"status": "False Alternance", "confidence": int(score * 100)}
-    else:
-        return {"status": "No Alternance", "confidence": int(score * 100)}
-
-def detect_repetition(history):
-    last = get_last_non_draw(history)
-    if last is None:
-        return "None (only draws)"
-
-    count = 1
-    for item in reversed(list(history)[:-1]):
-        if item == "🟡":
-            continue
-        if item == last:
-            count += 1
-        else:
-            break
-
-    return f"{count}x {last}" if count > 1 else "None"
-
-def detect_pattern(history):
-    if len(history) < 6:
-        return "Insufficient data"
-
-    window = list(history)[-WINDOW_PATTERN:]
-    clean = remove_draws(window)
-
-    if window.count("🟡") >= 2:
-        return "Draw as manipulation anchor"
-
-    if len(clean) >= 4 and all(clean[i] != clean[i + 1] for i in range(len(clean) - 1)):
-        return "Structural alternance"
-
-    counts = Counter(clean)
-    if counts:
-        dominant, qty = counts.most_common(1)[0]
-        if qty >= 4:
-            return f"Dominant block {dominant}"
-
-    if len(clean) >= 4 and clean[-1] != clean[-2] and clean[-2] == clean[-3]:
-        return "Pattern reversal"
-
-    return "Camouflaged / mixed pattern"
-
-def detect_manipulation_level(alt_status, pattern):
-    if alt_status == "Clean Alternance":
-        return 1
-    if alt_status == "Noisy Alternance":
-        return 3
-    if "Dominant block" in pattern:
-        return 4
-    if pattern == "Pattern reversal":
-        return 6
-    if alt_status == "False Alternance":
-        return 7
-    if "Camouflaged" in pattern:
-        return 8
-    return 5
-
-def detect_breach(alt_status, confidence, pattern):
-    return (
-        alt_status == "Clean Alternance"
-        and confidence >= 80
-        and "Camouflaged" not in pattern
-    )
-
-def predict_next(history, alt_status, confidence, pattern):
-    last = get_last_non_draw(history)
-    if last is None or len(history) < 3:
-        return "WAIT", 0
-
-    if alt_status in ("Clean Alternance", "Noisy Alternance"):
-        return ("🔵" if last == "🔴" else "🔴"), confidence
-
-    if "Dominant block" in pattern:
-        dominant = pattern.split()[-1]
-        return dominant, 60
-
-    return "WAIT", 0
-
-# ================= UI ======================
-st.title("Football Studio AI - Complete Analysis System")
+# =====================================================
+# UI
+# =====================================================
+st.title("⚽ Football Studio – FUSION ENGINE")
 
 c1, c2, c3, c4 = st.columns(4)
-with c1:
-    if st.button("🔴 Home"):
-        st.session_state.history.append("🔴")
-with c2:
-    if st.button("🔵 Away"):
-        st.session_state.history.append("🔵")
-with c3:
-    if st.button("🟡 Draw"):
-        st.session_state.history.append("🟡")
-with c4:
-    if st.button("Reset"):
-        st.session_state.history.clear()
+if c1.button("🔴 Home"):
+    st.session_state.history.appendleft("R")
+if c2.button("🔵 Away"):
+    st.session_state.history.appendleft("B")
+if c3.button("🟡 Draw"):
+    st.session_state.history.appendleft("D")
+if c4.button("Reset"):
+    st.session_state.history.clear()
+    st.session_state.cycle_memory.clear()
+    st.session_state.rounds_without_draw = 0
+
+# =====================================================
+# DRAW COUNTER
+# =====================================================
+if st.session_state.history:
+    if st.session_state.history[0] == "D":
+        st.session_state.rounds_without_draw = 0
+    else:
+        st.session_state.rounds_without_draw += 1
+
+# =====================================================
+# HISTORY VIEW
+# =====================================================
+st.subheader("📊 Histórico (Recente → Antigo)")
+
+def icon(x):
+    return "🔴" if x == "R" else "🔵" if x == "B" else "🟡"
+
+st.write(" ".join(icon(x) for x in list(st.session_state.history)[:45]))
+
+# =====================================================
+# BLOCK EXTRACTION
+# =====================================================
+def extract_blocks(hist):
+    if not hist:
+        return []
+
+    blocks = []
+    cur = hist[0]
+    size = 1
+
+    for i in range(1, len(hist)):
+        if hist[i] == cur:
+            size += 1
+        else:
+            blocks.append({"color": cur, "size": size})
+            cur = hist[i]
+            size = 1
+
+    blocks.append({"color": cur, "size": size})
+
+    for b in blocks:
+        if b["color"] == "D":
+            b["type"] = "DRAW"
+        elif b["size"] == 1:
+            b["type"] = "CHOPPY"
+        elif b["size"] == 2:
+            b["type"] = "DUPLO"
+        elif b["size"] == 3:
+            b["type"] = "TRIPLO"
+        elif b["size"] >= 6:
+            b["type"] = "STREAK FORTE"
+        elif b["size"] >= 4:
+            b["type"] = "STREAK"
+        else:
+            b["type"] = "DECAIMENTO"
+
+    return blocks
+
+# =====================================================
+# CYCLE MEMORY
+# =====================================================
+def update_cycle_memory(blocks):
+    if not blocks:
+        return
+    t = blocks[0]["type"]
+    mem = st.session_state.cycle_memory
+    if not mem or mem[-1] != t:
+        mem.append(t)
+    if len(mem) > 3:
+        mem[:] = mem[-3:]
+
+# =====================================================
+# PATTERN ENGINE (ACUMULATIVO)
+# =====================================================
+def detect_patterns(blocks):
+    signals = []
+    if not blocks:
+        return signals
+
+    sizes = [b["size"] for b in blocks]
+    colors = [b["color"] for b in blocks]
+    types = [b["type"] for b in blocks]
+
+    # --- BASE ---
+    if types[0] == "CHOPPY":
+        signals.append((colors[0], 12, "CHOPPY"))
+
+    if types[0] in ["STREAK", "STREAK FORTE"]:
+        signals.append((colors[0], 10, types[0]))
+
+    # --- ALTERNÂNCIA ---
+    if len(colors) >= 4 and all(colors[i] != colors[i+1] for i in range(3)):
+        signals.append((colors[0], 14, "ALTERNÂNCIA REAL"))
+
+    # --- COLAPSO ---
+    if len(sizes) >= 3 and sizes[:3] == [1, 1, 2]:
+        signals.append((colors[2], 16, "COLAPSO ALTERNÂNCIA"))
+
+    # --- SIMETRIA ---
+    if len(sizes) >= 6 and sizes[:3] == sizes[3:6]:
+        signals.append((colors[0], 15, "SIMETRIA REPETIDA"))
+
+    # --- DRAW ---
+    if st.session_state.rounds_without_draw >= 30:
+        signals.append(("D", 18, "DRAW HUNTING"))
+
+    if types[0] == "DRAW" and len(types) > 1 and "STREAK" in types[1]:
+        signals.append(("D", 20, "DRAW ÂNCORA"))
+
+    return signals
+
+# =====================================================
+# FINAL DECISION (NUNCA REDUZ)
+# =====================================================
+def ia_decision(hist):
+    blocks = extract_blocks(hist)
+    update_cycle_memory(blocks)
+    signals = detect_patterns(blocks)
+
+    if not signals:
+        return "⏳ AGUARDAR", 0, "SEM SINAIS"
+
+    score_map = {}
+    context = []
+
+    for color, score, name in signals:
+        score_map[color] = score_map.get(color, 0) + score
+        context.append(name)
+
+    mem = st.session_state.cycle_memory
+    if len(mem) == 3 and mem[0] == mem[2]:
+        for k in score_map:
+            score_map[k] += 5
+            context.append("RESSONÂNCIA CICLO")
+
+    color, score = max(score_map.items(), key=lambda x: x[1])
+
+    if score >= 55:
+        label = "🔴 HOME" if color == "R" else "🔵 AWAY" if color == "B" else "🟡 DRAW"
+        return f"🎯 APOSTAR {label}", score, " | ".join(context)
+
+    return "⏳ AGUARDAR", score, " | ".join(context)
+
+# =====================================================
+# OUTPUT
+# =====================================================
+decision, score, context = ia_decision(list(st.session_state.history))
 
 st.divider()
+st.subheader("🎯 DECISÃO DA IA")
+st.success(f"{decision}\n\nScore: {score}\n\nContexto: {context}")
 
-# ================= HISTORY (VISUAL CORRETO) =================
-hist_internal = list(st.session_state.history)     # antigo -> recente
-hist_display = hist_internal[::-1]                 # recente -> antigo
+with st.expander("🧠 Memória de Ciclos"):
+    st.write(st.session_state.cycle_memory)
 
-rows = [hist_display[i:i + 9] for i in range(0, len(hist_display), 9)]
-
-st.subheader("History (9x10 – mais recente à esquerda)")
-for row in rows[:10]:
-    st.write(" ".join(row))
-
-# ================= ANALYSIS PANEL ==========
-alt = detect_alternance(hist_internal)
-pattern = detect_pattern(hist_internal)
-rep = detect_repetition(hist_internal)
-level = detect_manipulation_level(alt["status"], pattern)
-breach = detect_breach(alt["status"], alt["confidence"], pattern)
-prediction, conf = predict_next(
-    hist_internal,
-    alt["status"],
-    alt["confidence"],
-    pattern
-)
-
-st.divider()
-
-st.subheader("Analysis Panel")
-a, b, c, d, e = st.columns(5)
-a.metric("Alternance", alt["status"])
-b.metric("Confidence", f"{alt['confidence']}%")
-c.metric("Repetition", rep)
-d.metric("Manipulation Level", level)
-e.metric("Breach", "YES" if breach else "NO")
-
-st.subheader("Detected Pattern")
-st.info(pattern)
-
-st.subheader("Decision")
-if breach:
-    st.success(f"ENTRY SUGGESTED: {prediction} ({conf}%)")
-elif prediction != "WAIT":
-    st.warning(f"Possible path: {prediction} ({conf}%)")
-else:
-    st.info("WAIT - No statistical advantage")
-
-st.caption(
-    "Versão estável. Histórico interno preservado | Exibição corrigida "
-    "| Alternância, blocos, reversão, draw anchor e brechas ativas."
-)
+with st.expander("🟡 Draw Stats"):
+    st.write(f"Rodadas sem Draw: {st.session_state.rounds_without_draw}")
