@@ -1,23 +1,26 @@
 import streamlit as st
 
 # =====================================================
-# CONFIGURAÇÃO
+# CONFIG
 # =====================================================
 st.set_page_config(
-    page_title="Football Studio – Leitura Real",
+    page_title="Football Studio – AI FINAL",
     layout="wide"
 )
 
 # =====================================================
-# ESTADO
+# STATE
 # =====================================================
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "cycle_memory" not in st.session_state:
+    st.session_state.cycle_memory = []
+
 # =====================================================
-# UI – ENTRADAS
+# UI
 # =====================================================
-st.title("⚽ Football Studio – Leitura Real de Mesa Física")
+st.title("⚽ Football Studio – AI FINAL (Baixo Erro)")
 
 c1, c2, c3, c4 = st.columns(4)
 if c1.button("🔴 Home"):
@@ -28,9 +31,10 @@ if c3.button("🟡 Draw"):
     st.session_state.history.insert(0, "🟡")
 if c4.button("Reset"):
     st.session_state.history.clear()
+    st.session_state.cycle_memory.clear()
 
 # =====================================================
-# HISTÓRICO 9x10 (RECENTE → ANTIGO)
+# HISTÓRICO 9x10
 # =====================================================
 st.divider()
 st.subheader("📊 Histórico (Mais recente → Mais antigo)")
@@ -43,7 +47,7 @@ def render_history(hist):
 render_history(st.session_state.history)
 
 # =====================================================
-# LEITURA – BLOCO ATIVO
+# BLOCO ATIVO
 # =====================================================
 def get_active_block(history):
     if not history:
@@ -51,120 +55,96 @@ def get_active_block(history):
 
     base = history[0]
     size = 1
-
     for i in range(1, len(history)):
         if history[i] == base:
             size += 1
         else:
             break
-
     return base, size
 
 # =====================================================
-# ANÁLISE COMPLETA (CORRIGIDA)
+# CICLOS (TIPO DE MESA)
 # =====================================================
-def analyze_table(history):
-    if len(history) < 2:
-        return {
-            "context": "INÍCIO DE MESA",
-            "reading": "Sem leitura ainda",
-            "suggestion": "WAIT",
-            "confidence": 0,
-            "level": "NEUTRO"
-        }
+def classify_block(size):
+    if size == 1:
+        return "CHOPPY"
+    if size == 2:
+        return "CURTO"
+    if size == 3:
+        return "STREAK"
+    if size >= 4:
+        return "STREAK_FORTE"
 
-    block_color, block_size = get_active_block(history)
+def update_cycle(block_type):
+    mem = st.session_state.cycle_memory
+    if not mem or mem[-1] != block_type:
+        mem.append(block_type)
+    if len(mem) > 3:
+        mem[:] = mem[-3:]
+
+# =====================================================
+# ANÁLISE FINAL (RESOLVE O ERRO)
+# =====================================================
+def analyze(history):
+    if len(history) < 3:
+        return "INÍCIO", "WAIT", 0, "SEM LEITURA"
+
+    color, size = get_active_block(history)
     prev = history[1]
 
-    # ---------------- EMPATE ----------------
-    if block_color == "🟡":
-        return {
-            "context": "RESET / ATRASO",
-            "reading": "Empate usado para travar fluxo",
-            "suggestion": "WAIT",
-            "confidence": 0,
-            "level": "CONTROLE"
-        }
+    # -------- EMPATE --------
+    if color == "🟡":
+        return "RESET", "WAIT", 0, "EMPATE TRAVA MESA"
 
-    # ---------------- CONTINUIDADE FORTE ----------------
-    if block_size >= 4:
-        return {
-            "context": f"CONTINUIDADE FORTE {block_color}",
-            "reading": "Bloco dominante ativo",
-            "suggestion": block_color,
-            "confidence": min(60 + block_size * 4, 78),
-            "level": "BAIXO RISCO"
-        }
+    block_type = classify_block(size)
+    update_cycle(block_type)
 
-    # ---------------- CONTINUIDADE ----------------
-    if block_size == 3:
-        return {
-            "context": f"CONTINUIDADE {block_color}",
-            "reading": "Fluxo ainda saudável",
-            "suggestion": block_color,
-            "confidence": 62,
-            "level": "MODERADO"
-        }
+    mem = st.session_state.cycle_memory
 
-    # ---------------- BLOCO EM FORMAÇÃO ----------------
-    if block_size == 2:
-        return {
-            "context": f"BLOCO EM FORMAÇÃO {block_color}",
-            "reading": "Definição de lado",
-            "suggestion": block_color,
-            "confidence": 58,
-            "level": "MODERADO"
-        }
+    # -------- FILTRO DE MATURAÇÃO --------
+    if size < 3:
+        return "FORMAÇÃO", "WAIT", 0, "BLOCO AINDA NÃO PAGA"
 
-    # ---------------- BLOCO UNITÁRIO ----------------
-    if block_size == 1:
-        if prev != "🟡" and prev != block_color:
-            return {
-                "context": "RESPIRO / ARMADILHA",
-                "reading": "Quebra curta sem confirmação",
-                "suggestion": prev,
-                "confidence": 52,
-                "level": "ALTO RISCO"
-            }
+    # -------- FILTRO DE SATURAÇÃO --------
+    if mem.count("STREAK_FORTE") >= 2:
+        return "SATURAÇÃO", "WAIT", 0, "CICLO REPETIDO"
 
-        return {
-            "context": "INDECISÃO",
-            "reading": "Mesa serrilhada / choppy",
-            "suggestion": "WAIT",
-            "confidence": 0,
-            "level": "ALTO RISCO"
-        }
+    # -------- FILTRO DE ARMADILHA --------
+    if size == 3 and prev != color and prev != "🟡":
+        return "ARMADILHA", "WAIT", 0, "STREAK CURTA SUSPEITA"
+
+    # -------- ENTRADA VÁLIDA --------
+    confidence = 60 + min(size * 3, 12)
+
+    return (
+        f"CONTINUIDADE {color}",
+        color,
+        confidence,
+        f"{block_type} MATURADO"
+    )
 
 # =====================================================
-# PAINEL DE ANÁLISE
+# OUTPUT
 # =====================================================
-analysis = analyze_table(st.session_state.history)
+context, suggestion, conf, reading = analyze(st.session_state.history)
 
 st.divider()
-st.subheader("🧠 Análise da Mesa")
+st.subheader("🧠 Análise")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Contexto", analysis["context"])
-c2.metric("Nível da Mesa", analysis["level"])
-c3.metric("Confiança", f"{analysis['confidence']}%")
+c1.metric("Contexto", context)
+c2.metric("Confiança", f"{conf}%")
+c3.metric("Ciclo", " → ".join(st.session_state.cycle_memory))
 
-st.info(f"📌 Leitura: {analysis['reading']}")
+st.info(f"📌 Leitura: {reading}")
 
-# =====================================================
-# DECISÃO
-# =====================================================
 st.subheader("🎯 Decisão")
-
-if analysis["suggestion"] in ["🔴", "🔵"]:
-    st.success(
-        f"ENTRADA SUGERIDA: {analysis['suggestion']} "
-        f"({analysis['confidence']}%)"
-    )
+if suggestion in ["🔴", "🔵"]:
+    st.success(f"ENTRADA SUGERIDA: {suggestion} ({conf}%)")
 else:
-    st.warning("AGUARDAR – mesa sem vantagem clara")
+    st.warning("AGUARDAR – proteção de banca ativa")
 
 st.caption(
-    "Leitura real de Football Studio: "
-    "mais recente à esquerda, análise por bloco ativo, "
-    "empate como reset e leitura sempre para mais."
+    "Sistema final: bloco ativo + maturação + memória de ciclo + freio de saturação. "
+    "Menos entradas, muito menos erro."
 )
